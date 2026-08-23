@@ -9,7 +9,11 @@
 // AuthenticationState (creds + SignalKeyStore), calqué sur l'implémentation
 // officielle useMultiFileAuthState, mais avec le disque remplacé par db.js.
 
-import { BufferJSON, initAuthCreds, proto } from '@whiskeysockets/baileys';
+import {
+  BufferJSON,
+  initAuthCreds,
+  proto
+} from '@whiskeysockets/baileys';
 import { logger } from '../utils/logger.js';
 
 const log = logger.child({ class: 'authStore' });
@@ -46,30 +50,43 @@ export async function useDatabaseAuthState(db) {
   return {
     state: {
       creds,
+
       keys: {
         get: async (type, ids) => {
           const result = {};
+
           for (const id of ids) {
             let value = readData(`${type}-${id}`);
+
             if (type === 'app-state-sync-key' && value) {
               value = proto.Message.AppStateSyncKeyData.fromObject(value);
             }
+
             result[id] = value;
           }
+
           return result;
         },
+
         set: async (data) => {
           for (const category of Object.keys(data)) {
             for (const id of Object.keys(data[category])) {
               const value = data[category][id];
               const key = `${category}-${id}`;
-              if (value) writeData(key, value);
-              else removeData(key);
+
+              if (value) {
+                writeData(key, value);
+              } else {
+                removeData(key);
+              }
             }
           }
         },
       },
     },
-    saveCreds: async () => writeData('creds', creds),
+
+    saveCreds: async () => {
+      writeData('creds', creds);
+    },
   };
 }
