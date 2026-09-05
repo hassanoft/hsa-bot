@@ -33,11 +33,21 @@ async function startHttpServer() {
 async function main() {
   log.info(`Démarrage de ${config.botName}...`);
 
+  // 1. Charger les commandes
   await loadCommands();
   log.info(`📦 ${getAllCommands().length} commandes disponibles.`);
 
+  // 2. Démarrer le serveur HTTP (pour que Render voie que le service est "live")
   await startHttpServer();
-  await startConnection();
+
+  // 3. Démarrer la connexion WhatsApp
+  try {
+    await startConnection();
+  } catch (err) {
+    // Si la connexion plante au démarrage (ex: mauvais numéro), on log l'erreur 
+    // sans tuer le serveur HTTP, pour que Render ne redémarre pas en boucle.
+    log.error("Erreur critique au démarrage de la connexion WhatsApp:", err?.message || err);
+  }
 }
 
 process.on('unhandledRejection', (err) => {
