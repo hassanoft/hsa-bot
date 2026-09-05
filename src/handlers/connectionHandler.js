@@ -4,7 +4,6 @@ import { makeWASocket,
   fetchLatestBaileysVersion,
   Browsers,
 } from '@whiskeysockets/baileys';
-import readline from 'node:readline';
 import fs from 'node:fs';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
@@ -13,16 +12,6 @@ import { useDatabaseAuthState } from '../database/authStore.js';
 import { handleMessagesUpsert, handleGroupParticipantsUpdate } from './messageHandler.js';
 
 const log = logger.child({ class: 'connection' });
-
-function askQuestion(query) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(query, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
 
 async function getAuthState() {
   if (config.authStorage === 'database') {
@@ -37,6 +26,16 @@ async function getAuthState() {
 let reconnectAttempts = 0;
 
 export async function startConnection() {
+  // 🔥 ÉTAPE 1 : Forcer la suppression de la vieille session (pour régler le "Connexion impossible")
+  if (process.env.RESET_SESSION === 'true') {
+    log.warn('🔥 Réinitialisation de la session demandée. Suppression du dossier auth...');
+    if (fs.existsSync(config.authDir)) {
+      fs.rmSync(config.authDir, { recursive: true, force: true });
+    }
+    // On supprime la variable pour ne pas recommencer à chaque redémarrage
+    delete process.env.RESET_SESSION; 
+  }
+
   const { state, saveCreds } = await getAuthState();
   const { version, isLatest } = await fetchLatestBaileysVersion();
   log.debug(`Version Baileys/WA utilisée : ${version.join('.')} (à jour : ${isLatest})`);
@@ -74,31 +73,25 @@ export async function startConnection() {
 async function requestPairingCode(sock) {
   let number = config.whatsappNumber;
 
+  // 🚨 ÉTAPE 2 : Plus besoin de readline ! On prend directement le numéro depuis le .env ou les variables Render
   if (!number) {
-    if (process.stdin.isTTY) {
-      number = (
-        await askQuestion('📱 Entrez le numéro WhatsApp du bot (format international, ex: 2250700000000) : ')
-      ).replace(/\D/g, '');
-    } else {
-      log.error(
-        "WHATSAPP_NUMBER n'est pas défini et aucun terminal interactif n'est disponible (déploiement Render). " +
-          "Définissez la variable d'environnement WHATSAPP_NUMBER puis redéployez pour obtenir le code d'appairage."
-      );
-      return;
-    }
-  }
-
-  if (!number) {
-    log.error('Aucun numéro fourni, connexion impossible.');
+    log.error(
+      "❌ WHATSAPP_NUMBER n'est pas défini dans les variables d'environnement. " +
+      "Le code d'appairage ne peut pas être généré."
+    );
     return;
   }
+
+  // On nettoie le numéro (enlève les +, espaces, tirets)
+  number = String(number).replace(/\D/g, '');
 
   try {
     await new Promise((resolve) => setTimeout(resolve, 1500)); // laisse le socket s'initialiser
     const code = await sock.requestPairingCode(number);
     log.info('════════════════════════════════════════');
-    log.info(`   CODE D'APPAIRAGE : ${code}`);
+    log.info(`   📱 CODE D'APPAIRAGE : ${code}`);
     log.info('   WhatsApp > Appareils liés > Lier un appareil > Lier avec un numéro de téléphone');
+    log.info('   ⚠️ Ce code expire dans 2 minutes ! Entrez-le immédiatement.');
     log.info('════════════════════════════════════════');
   } catch (err) {
     log.error("Échec de génération du code d'appairage.", err.message);
@@ -114,7 +107,7 @@ function onConnectionUpdate(sock, update) {
 
     if (loggedOut) {
       log.error(
-        'Session WhatsApp déconnectée (logout). Supprimez le dossier de session (AUTH_DIR) ' +
+        '❌ Session WhatsApp déconnectée (logout). Supprimez le dossier de session (AUTH_DIR) ' +
           'et relancez le bot pour ré-appairer un nouveau numéro.'
       );
       return;
